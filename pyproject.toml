@@ -1,0 +1,16 @@
+[project]
+name = "triton_kernels"
+version = "0.0.1"
+description = "Triton implementation of common kernels for deep leaning."
+authors = [{name = 'Matteo Bonotto', email = "m.bonotto@outlook.com"}]
+
+[build-system]
+requires = ["poetry-core>=1.0.0,<2.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.dependencies]
+python = ">=3.11"
+numpy = "*"
+black = "*"
+mypy = "*"
+pytest = "*"
