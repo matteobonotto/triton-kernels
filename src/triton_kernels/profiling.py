@@ -4,6 +4,7 @@ from typing import Dict, Any
 import psutil
 from time import time
 
+
 class CUDAMemTracker:
     def __init__(self, device=None):
         self.device = torch.device(device or "cuda")
@@ -13,7 +14,9 @@ class CUDAMemTracker:
         torch.cuda.reset_peak_memory_stats(self.device)
         self.start_alloc = torch.cuda.memory_allocated(self.device)
         self.start_reserved = torch.cuda.memory_reserved(self.device)
-        self.start_rss = psutil.Process(os.getpid()).memory_info().rss if psutil else None
+        self.start_rss = (
+            psutil.Process(os.getpid()).memory_info().rss if psutil else None
+        )
         return self
 
     def __exit__(self, exc_type, exc, tb):
@@ -34,28 +37,27 @@ class CUDAMemTracker:
         }
 
 
-
-def profile_torch_module_forward(module: torch.nn.Module, inputs: Dict[str, Any])
+def profile_torch_module_forward(module: torch.nn.Module, inputs: Dict[str, Any]):
     t0 = time()
     with CUDAMemTracker() as t:
         module(**inputs)
     t1 = time() - t0
-    
+
     report = t.report()
-    print(f'Elapsed time:       {t1:3.3}s')
-    print(f'Peak allocated mem: {report['peak_alloc_MB']:3.3}MB')
-    print(f'Peak reserved mem:  {report['peak_alloc_MB']:3.3}MB')
-    
-    
-def profile_torch_module_backward(module: torch.nn.Module, inputs: Dict[str, Any])
+    print(f"Elapsed time:       {t1:3.3}s")
+    print(f"Peak allocated mem: {report['peak_alloc_MB']:3.3}MB")
+    print(f"Peak reserved mem:  {report['peak_alloc_MB']:3.3}MB")
+
+
+def profile_torch_module_backward(module: torch.nn.Module, inputs: Dict[str, Any]):
     t0 = time()
     with CUDAMemTracker() as t:
         out = module(**inputs)
         loss = out.sum()
         loss.backward()
     t1 = time() - t0
-    
+
     report = t.report()
-    print(f'Elapsed time:       {t1:3.3}s')
-    print(f'Peak allocated mem: {report['peak_alloc_MB']:3.3}MB')
-    print(f'Peak reserved mem:  {report['peak_alloc_MB']:3.3}MB')
+    print(f"Elapsed time:       {t1:3.3}s")
+    print(f"Peak allocated mem: {report['peak_alloc_MB']:3.3}MB")
+    print(f"Peak reserved mem:  {report['peak_alloc_MB']:3.3}MB")

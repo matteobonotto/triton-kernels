@@ -4,7 +4,7 @@ from torch import Tensor, nn
 import triton
 
 from triton_kernels.utils import get_device
-from triton_kernels.kernels import FusedSoftmax
+from triton_kernels.nn import FusedSoftmax
 
 DEVICE = get_device()
 
