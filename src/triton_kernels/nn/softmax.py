@@ -11,7 +11,7 @@ torch_ref_module = nn.Softmax
 
 
 @triton.jit
-def _softmax_triton(
+def _softmax_triton_fwd(
     x_pointer, y_pointer, x_stride, y_stride, n_rows, n_cols, block_size: tl.constexpr
 ):
     # get the program id: each program of the grid handles one (or more) rows of the tensor
@@ -33,7 +33,7 @@ def _softmax_triton(
         # compute the softmax (with shift for numerical stab.)
         row = tl.load(x_col_pointer, mask, other=-float("inf"))
 
-        row_minus_max = row - tl.max(row, axis=0)
+        row_minus_max = row# - tl.max(row, axis=0)
         num = tl.exp(row_minus_max)
         den = tl.sum(num, axis=0)
         y = num / den
@@ -43,7 +43,7 @@ def _softmax_triton(
         tl.store(y_col_pointer, y, mask)
 
 
-def _softmax(x: Tensor, block_size: int = 1024) -> Tensor:
+def _softmax_fwd(x: Tensor, block_size: int = 1024) -> Tensor:
     validate_tensor_device(x)
 
     n_rows, n_cols = x.shape
@@ -51,24 +51,46 @@ def _softmax(x: Tensor, block_size: int = 1024) -> Tensor:
     grid = (n_rows,)
     BLOCK_SIZE = triton.next_power_of_2(n_cols)  # Used to tile the row
 
-    _softmax_triton[grid](x, y, x.stride(0), y.stride(0), n_rows, n_cols, BLOCK_SIZE)
+    _softmax_triton_fwd[grid](x, y, x.stride(0), y.stride(0), n_rows, n_cols, BLOCK_SIZE)
     return y
 
 
-class SoftmaxFunction(Function):
-    def forward(cts, x):
-        return _softmax(x)
+def _softmax_triton_bkw():
+    ...
+    
+def _softmax_bwd():
+    ...
 
-    def backward(ctx, x):
-        raise NotImplementedError()
+
+
+class SoftmaxFunction(Function):
+    def forward(ctx, x):
+        out = _softmax_fwd(x)
+        ctx.save_for_backward(x, out)
+        return out
+
+    def backward(ctx, grad_output):
+        x, out = ctx.saved_tensors
+        
+        # exp = torch.exp(x)
+        # den = exp.sum(dim=1)
+        # derivative = (exp * (den - exp)) / den ** 2
+        
+        # y = torch.softmax(x, dim=1)
+        dot = (out * grad_output).sum(dim=1, keepdim=True)
+        grad_input = out * (grad_output - dot)
+        
+        # derivative = _softmax_bwd(x)
+        return grad_input
 
 
 class Softmax(nn.Module):
     def __init__(self):
         super().__init__()
 
-    def forwad(self, x: Tensor) -> Tensor:
-        if x.ndim > 1:
+    def forward(self, x: Tensor) -> Tensor:
+        if x.ndim > 2:
+            shape = x.shape
             x = validate_contiguous(x)
-            return SoftmaxFunction.apply(x.view(-1)).view(x.shape)
+            return SoftmaxFunction.apply(x.view(-1, shape[-1])).view(x.shape)
         return SoftmaxFunction.apply(x)

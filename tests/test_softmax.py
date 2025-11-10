@@ -1,3 +1,6 @@
+from triton_kernels.utils import get_device
+from triton_kernels.nn import Softmax
+
 import pytest
 import os
 import torch
@@ -7,37 +10,36 @@ import triton
 import triton.language as tl
 import math
 
-from triton_kernels.utils import get_device
-from triton_kernels.nn import GELU
 
 DEVICE = get_device()
 
 test_tensors = [
-    torch.rand(100),
-    torch.rand(100, 100)
+    torch.rand(100, 100),
+    torch.rand(8, 100, 100),
 ]
 
 @pytest.mark.parametrize('x', test_tensors)
-def test_gelu_fwd(x: Tensor):
+def test_softmax_fwd(x: Tensor):
     x = x.to(DEVICE)
-    triton.testing.assert_close(nn.GELU()(x), GELU()(x))
+    triton.testing.assert_close(nn.functional.softmax(x), Softmax()(x))
 
 
 from torch import autograd
 
-def test_gelu(x: Tensor):
+@pytest.mark.parametrize('x', test_tensors)
+def test_softmax(x: Tensor):
     x = x.to(DEVICE)
     x.requires_grad = True
     
-    out = GELU()(x)
-    out_ref = nn.GELU()(x)
-    # assert  triton.testing.assert_close(out, out_ref)
+    out = Softmax()(x)
+    out_ref = nn.functional.softmax(x)
+    triton.testing.assert_close(out, out_ref, atol=1e-6)
     
     grad_outputs = torch.rand_like(x).to(DEVICE)
     grads_ref = autograd.grad(out_ref, (x, ), grad_outputs=grad_outputs, retain_graph=True)
     grads = autograd.grad(out, (x, ), grad_outputs=grad_outputs, retain_graph=True)
     for g_r, g in zip(grads_ref, grads):
-        triton.testing.assert_close(g_r, g)
+        triton.testing.assert_close(g_r, g, atol=1e-6)
     
     
-test_gelu(torch.rand(100))
+test_softmax(test_tensors[0])
