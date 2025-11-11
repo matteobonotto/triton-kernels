@@ -24,7 +24,8 @@ def _gelu_fwd_triton(
     x = tl.load(x_ptr + ptr_offset, mask)
 
     angle = tl.sqrt(2 / pi) * (x + 0.044715 * x * x * x)
-    tanh = (tl.exp(2 * angle) - 1) / (tl.exp(2 * angle) + 1)
+    tmp = tl.exp(2 * angle)
+    tanh = (tmp - 1) / (tmp + 1)
     phi = 0.5 * (1 + tanh)
     chunk_act = x * phi
 
