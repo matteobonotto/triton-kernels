@@ -4,7 +4,7 @@ from triton_kernels.nn import Softmax
 import pytest
 import os
 import torch
-from torch import Tensor, nn
+from torch import Tensor, nn, autograd
 
 import triton
 import triton.language as tl
@@ -14,8 +14,9 @@ import math
 DEVICE = get_device()
 
 test_tensors = [
-    torch.rand(100, 100),
-    torch.rand(8, 100, 100),
+    torch.rand(100),
+    torch.rand(10, 100),
+    torch.rand(2, 3, 4),
 ]
 
 @pytest.mark.parametrize('x', test_tensors)
@@ -23,8 +24,8 @@ def test_softmax_fwd(x: Tensor):
     x = x.to(DEVICE)
     triton.testing.assert_close(nn.functional.softmax(x), Softmax()(x))
 
+# test_softmax_fwd(test_tensors[0])
 
-from torch import autograd
 
 @pytest.mark.parametrize('x', test_tensors)
 def test_softmax(x: Tensor):
@@ -32,7 +33,7 @@ def test_softmax(x: Tensor):
     x.requires_grad = True
     
     out = Softmax()(x)
-    out_ref = nn.functional.softmax(x)
+    out_ref = nn.functional.softmax(x, dim=-1)
     triton.testing.assert_close(out, out_ref, atol=1e-6)
     
     grad_outputs = torch.rand_like(x).to(DEVICE)
@@ -42,4 +43,4 @@ def test_softmax(x: Tensor):
         triton.testing.assert_close(g_r, g, atol=1e-6)
     
     
-test_softmax(test_tensors[0])
+# test_softmax(test_tensors[0])

@@ -20,20 +20,19 @@ def _softmax_triton_fwd(
     # strided execution: can run the program in a strided way (e.g. for row 0, 8, 16, ...)
     row_step = tl.num_programs(axis=0)  # n. of programs running on given axis
 
+    col_offset = tl.arange(0, block_size)
+    # Create a mask to guard memory operations against out-of-bounds accesses.
+    mask = col_offset < n_cols
+
     # loop through the rows executed by program with this pid
     for row_idx in tl.range(pid, n_rows, row_step):
         x_row_pointer = x_pointer + row_idx * x_stride
-
-        col_offset = tl.arange(0, block_size)
         x_col_pointer = x_row_pointer + col_offset
-
-        # Create a mask to guard memory operations against out-of-bounds accesses.
-        mask = col_offset < n_cols
 
         # compute the softmax (with shift for numerical stab.)
         row = tl.load(x_col_pointer, mask, other=-float("inf"))
 
-        row_minus_max = row# - tl.max(row, axis=0)
+        row_minus_max = row - tl.max(row, axis=0)
         num = tl.exp(row_minus_max)
         den = tl.sum(num, axis=0)
         y = num / den
@@ -49,37 +48,111 @@ def _softmax_fwd(x: Tensor, block_size: int = 1024) -> Tensor:
     n_rows, n_cols = x.shape
     y = torch.empty_like(x)
     grid = (n_rows,)
-    BLOCK_SIZE = triton.next_power_of_2(n_cols)  # Used to tile the row
+    block_size = triton.next_power_of_2(n_cols)  # Used to tile the row
 
-    _softmax_triton_fwd[grid](x, y, x.stride(0), y.stride(0), n_rows, n_cols, BLOCK_SIZE)
+    _softmax_triton_fwd[grid](
+        x, y, x.stride(0), y.stride(0), n_rows, n_cols, block_size
+    )
     return y
 
 
-def _softmax_triton_bkw():
-    ...
-    
-def _softmax_bwd():
-    ...
+@triton.jit
+def load_tensor_row(x_ptr, row_idx, x_stride, col_ptr_offset, mask, other):
+    # row pointer
+    row_ptr = x_ptr + row_idx * x_stride
 
+    # col pointer
+    col_ptr = row_ptr + col_ptr_offset
+
+    # load all tensors
+    return tl.load(col_ptr, mask, other=other)
+
+
+@triton.jit
+def _softmax_triton_bwd(
+    s_ptr,
+    grad_output_ptr,
+    grad_input_ptr,
+    s_stride,
+    grad_output_stride,
+    grad_input_stride,
+    nrows,
+    ncols,
+    block_size: tl.constexpr,
+):
+
+    pid = tl.program_id(axis=0)
+    row_step = tl.num_programs(axis=0)
+    col_ptr_offset = tl.arange(0, block_size)
+    mask = col_ptr_offset < ncols
+
+    for row_idx in tl.range(pid, nrows, row_step):
+        ### load s
+        s = tl.load(s_ptr + row_idx * s_stride + col_ptr_offset, mask)
+
+        ### load grad_output
+        grad_output = tl.load(
+            grad_output_ptr + row_idx * grad_output_stride + col_ptr_offset,
+            mask,
+        )
+
+        # perform coputations
+        # grad_input = s * grad_output
+        alpha = tl.sum(s * grad_output, axis=0)
+        grad_input = s * (grad_output - alpha)
+
+        # store the results
+        tl.store(
+            grad_input_ptr + row_idx * grad_input_stride + col_ptr_offset,
+            grad_input,
+            mask,
+        )
+
+
+def _softmax_bwd(s: Tensor, grad_output: Tensor, block_size: int = 1024) -> Tensor:
+    for x in (s, grad_output):
+        validate_tensor_device(x)
+
+    nrows, ncols = s.shape
+    grad_input = torch.empty_like(grad_output).to(s.device)
+    grid = (nrows,)
+
+    block_size = triton.next_power_of_2(ncols)
+
+    _softmax_triton_bwd[grid](
+        s,
+        grad_output,
+        grad_input,
+        s.stride(0),
+        grad_output.stride(0),
+        grad_input.stride(0),
+        nrows,
+        ncols,
+        block_size,
+    )
+
+    return grad_input
 
 
 class SoftmaxFunction(Function):
     def forward(ctx, x):
-        out = _softmax_fwd(x)
-        ctx.save_for_backward(x, out)
-        return out
+        s = _softmax_fwd(x)
+        ctx.save_for_backward(s)
+        return s
 
     def backward(ctx, grad_output):
-        x, out = ctx.saved_tensors
-        
+        (s,) = ctx.saved_tensors
+
         # exp = torch.exp(x)
         # den = exp.sum(dim=1)
         # derivative = (exp * (den - exp)) / den ** 2
-        
+
         # y = torch.softmax(x, dim=1)
-        dot = (out * grad_output).sum(dim=1, keepdim=True)
-        grad_input = out * (grad_output - dot)
-        
+        # alpha = (s * grad_output).sum(dim=1, keepdim=True)
+        # grad_input = s * (grad_output - alpha)
+
+        grad_input = _softmax_bwd(s, grad_output)
+
         # derivative = _softmax_bwd(x)
         return grad_input
 
@@ -89,8 +162,9 @@ class Softmax(nn.Module):
         super().__init__()
 
     def forward(self, x: Tensor) -> Tensor:
+        if x.ndim == 1:
+            return SoftmaxFunction.apply(x[None, :]).squeeze()
         if x.ndim > 2:
-            shape = x.shape
             x = validate_contiguous(x)
-            return SoftmaxFunction.apply(x.view(-1, shape[-1])).view(x.shape)
+            return SoftmaxFunction.apply(x.view(-1, x.shape[-1])).view(x.shape)
         return SoftmaxFunction.apply(x)
