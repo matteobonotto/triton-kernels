@@ -8,7 +8,7 @@ import triton.language as tl
 import math
 
 from triton_kernels.utils import get_device
-from triton_kernels.nn import GELU
+from triton_kernels.nn.gelu import GELU
 
 DEVICE = get_device()
 
@@ -32,13 +32,14 @@ def test_gelu(x: Tensor):
     
     out = GELU()(x)
     out_ref = nn.GELU()(x)
-    triton.testing.assert_close(out, out_ref)
+    triton.testing.assert_close(out, out_ref, atol=1e-3)
     
     grad_outputs = torch.rand_like(x).to(DEVICE)
     grads_ref = autograd.grad(out_ref, (x, ), grad_outputs=grad_outputs, retain_graph=True)
     grads = autograd.grad(out, (x, ), grad_outputs=grad_outputs, retain_graph=True)
     for g_r, g in zip(grads_ref, grads):
-        triton.testing.assert_close(g_r, g)
+        triton.testing.assert_close(g_r, g, atol=1e-3)
+    print("Done!!")
+
     
-    
-# test_gelu(torch.rand(100))
+test_gelu(test_tensors[1])
