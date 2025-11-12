@@ -41,6 +41,7 @@ def test_softmax(x: Tensor):
     grads = autograd.grad(out, (x, ), grad_outputs=grad_outputs, retain_graph=True)
     for g_r, g in zip(grads_ref, grads):
         triton.testing.assert_close(g_r, g, atol=1e-6)
+    print("Done!!")
     
     
-# test_softmax(test_tensors[0])
+test_softmax(test_tensors[0])

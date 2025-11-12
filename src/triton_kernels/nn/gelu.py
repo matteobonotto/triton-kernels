@@ -8,8 +8,6 @@ from math import ceil, pi
 from ..utils import validate_tensor_device, validate_contiguous
 import math
 
-torch_ref_module = nn.GELU
-
 
 @triton.jit
 def _gelu_fwd_triton(
@@ -24,8 +22,8 @@ def _gelu_fwd_triton(
     x = tl.load(x_ptr + ptr_offset, mask)
 
     angle = tl.sqrt(2 / pi) * (x + 0.044715 * x * x * x)
-    tmp = tl.exp(2 * angle)
-    tanh = (tmp - 1) / (tmp + 1)
+    exp = tl.exp(2 * angle)
+    tanh = (exp - 1) / (exp + 1)
     phi = 0.5 * (1 + tanh)
     chunk_act = x * phi
 
@@ -102,7 +100,6 @@ class GeluFunction(Function):
         # gx = (2 / math.pi) ** 0.5 * (x + 0.044715 * x ** 3)
         # tanh = nn.functional.tanh(gx)
         # phi_prime = factor * (1 - tanh**2) * (1 + 3 * 0.044715 * x ** 2)
-
         # phi = 0.5 * (1 + tanh)
 
         # derivative = phi + x * phi_prime
@@ -119,3 +116,27 @@ class GELU(nn.Module):
             x = validate_contiguous(x)
             return GeluFunction.apply(x.view(-1)).view(x.shape)
         return GeluFunction.apply(x)
+
+
+
+
+base_benchmark_kwargs = {
+    "x_names":['N'],  # argument names to use as an x-axis for the plot
+    "x_vals":[128 * i for i in range(2, 100, 10)],  # different possible values for `x_name`
+    "line_arg":'provider',  # argument name whose value corresponds to a different line in the plot
+    "line_vals":['triton', 'torch'],  # possible values for `line_arg``
+    "line_names":["Triton", "Torch"],  # label name for the lines
+    "plot_name":"gelu",  # name for the plot. Used also as a file name for saving the plot.
+    "args":{'M': 4096} # values for function arguments not in `x_names` and `y_name`
+}
+
+_fwd = GELU()
+
+def fwd(x, provider):
+    ### for benchmark olny! 
+    if provider == "torch":
+        return torch.nn.functional.gelu(x)
+    elif provider == 'triton':
+        return _fwd(x)
+    else:
+        raise ValueError

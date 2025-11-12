@@ -7,8 +7,6 @@ import triton.language as tl
 from ..utils import validate_tensor_device, validate_contiguous
 
 
-torch_ref_module = nn.Softmax
-
 
 @triton.jit
 def _softmax_triton_fwd(
@@ -142,18 +140,9 @@ class SoftmaxFunction(Function):
 
     def backward(ctx, grad_output):
         (s,) = ctx.saved_tensors
-
-        # exp = torch.exp(x)
-        # den = exp.sum(dim=1)
-        # derivative = (exp * (den - exp)) / den ** 2
-
-        # y = torch.softmax(x, dim=1)
         # alpha = (s * grad_output).sum(dim=1, keepdim=True)
         # grad_input = s * (grad_output - alpha)
-
         grad_input = _softmax_bwd(s, grad_output)
-
-        # derivative = _softmax_bwd(x)
         return grad_input
 
 
@@ -168,3 +157,27 @@ class Softmax(nn.Module):
             x = validate_contiguous(x)
             return SoftmaxFunction.apply(x.view(-1, x.shape[-1])).view(x.shape)
         return SoftmaxFunction.apply(x)
+
+
+
+
+base_benchmark_kwargs = {
+    "x_names":['N'],  # argument names to use as an x-axis for the plot
+    "x_vals":[128 * i for i in range(2, 100, 10)],  # different possible values for `x_name`
+    "line_arg":'provider',  # argument name whose value corresponds to a different line in the plot
+    "line_vals":['triton', 'torch'],  # possible values for `line_arg``
+    "line_names":["Triton", "Torch"],  # label name for the lines
+    "plot_name":"softmax",  # name for the plot. Used also as a file name for saving the plot.
+    "args":{'M': 4096} # values for function arguments not in `x_names` and `y_name`
+}
+
+_fwd = Softmax()
+
+def fwd(x, provider):
+    ### for benchmark olny! 
+    if provider == "torch":
+        return torch.nn.functional.softmax(x, dim=-1)#(x, axis=-1)
+    elif provider == 'triton':
+        return _fwd(x)
+    else:
+        raise ValueError
