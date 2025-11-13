@@ -12,7 +12,7 @@ def _linear_fwd_triton():
     
     
 def _linear_fwd(x:Tensor, W:Tensor, b:Optional[Tensor] = None) -> Tensor:
-    if b:
+    if b is not None:
         return x @ W.T + b
     return x @ W.T
 
@@ -24,19 +24,19 @@ def _linear_bwd_triton():
 def _linear_bwd(x, W, b, grad_output):
     grad_x = grad_output @ W
     grad_W = grad_output.T @ x
-    grad_b = None #grad_output.sum(dim=0)
+    grad_b = grad_output.sum(dim=-2) if b is not None else None
     return grad_x, grad_W, grad_b
     
 
 class LinearFunction(Function):
     @staticmethod
     def forward(ctx, x: Tensor, W:Tensor, b:Tensor):
-        ctx.save_for_backward(x)
+        ctx.save_for_backward(x, W, b)
         return _linear_fwd(x, W, b)
     
     @staticmethod
-    def backward(ctx, grad_output: Tensor, x: Tensor, W: Tensor, b: Optional[Tensor]):
-        x, = ctx.saved_tensors
+    def backward(ctx, grad_output: Tensor, ):
+        x, W, b = ctx.saved_tensors
         grad_x, grad_W, grad_b = _linear_bwd(x, W, b, grad_output)
         return grad_x, grad_W, grad_b
     
@@ -48,16 +48,16 @@ class Linear(nn.Linear):
     def forward(self, x:Tensor) -> Tensor:
         if x.ndim > 2:
             x = validate_contiguous(x)
-            new_shape = (1, ) + x.shape[-2:]
+            new_shape = (-1, x.shape[-1])
             return LinearFunction.apply(
                 x.view(new_shape), 
-                self.weight.data, 
-                self.bias.data if self.bias else None,
+                self.weight, 
+                self.bias if self.bias is not None else None,
             ).view(x.shape)
         return LinearFunction.apply(
                 x, 
-                self.weight.data, 
-                self.bias.data if self.bias else None,
+                self.weight, 
+                self.bias if self.bias is not None else None,
             )
 
 

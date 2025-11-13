@@ -44,4 +44,4 @@ def test_softmax(x: Tensor):
     print("Done!!")
     
     
-# test_softmax(test_tensors[0])
+test_softmax(test_tensors[-1])
