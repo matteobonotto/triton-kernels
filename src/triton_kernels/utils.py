@@ -2,6 +2,7 @@ import torch
 from torch import Tensor, nn
 import os
 
+
 def copy_weights(model_src: nn.Module, model_tgt: nn.Module) -> None:
     """Copy weights of model_src into model_tgt"""
     for src, tgt in zip(model_src.named_parameters(), model_tgt.named_parameters()):
@@ -9,6 +10,7 @@ def copy_weights(model_src: nn.Module, model_tgt: nn.Module) -> None:
         name_tgt, param_tgt = tgt
         if name_src == name_tgt:
             param_tgt.data = param_src.data.clone()
+
 
 def validate_contiguous(x: Tensor) -> Tensor:
     return x if x.is_contiguous() else x.contiguous()
